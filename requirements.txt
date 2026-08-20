@@ -1,0 +1,23 @@
+# Install a CUDA-compatible torch/torchvision build separately for the server.
+numpy>=1.24,<2
+pandas>=1.5
+scikit-learn>=1.2
+scipy>=1.9
+tqdm>=4.65
+PyYAML>=5.4.1
+gdown>=4.7.1
+requests>=2.28
+Pillow>=9.0
+json5>=0.9
+matplotlib>=3.6
+opencv-python-headless>=4.7
+imgaug>=0.4.0
+diffdist>=0.1
+faiss-cpu>=1.7.4
+timm==0.9.16
+foolbox==3.3.4
+statsmodels>=0.14
+Cython>=0.29.30,<3
+# libmr is installed separately with --no-build-isolation by the server script;
+# its source build incorrectly omits numpy from the isolated build requirements.
+pytest>=7.4

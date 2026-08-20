@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying manuscript."
+title: "From Hamiltonian Flows to Class-Centroid Geometry"
+type: software
+authors:
+  - family-names: Wang
+    given-names: Zilin
+  - family-names: Xiao
+    given-names: Lianghai
+repository-code: "https://github.com/zilamwong2005-math/Hamiltonian-Centroid-OOD"
+date-released: 2026-08-21
+version: "0.1.0"
+preferred-citation:
+  type: article
+  title: "From Hamiltonian Flows to Class-Centroid Geometry: A Mechanistic Study of Efficient Out-of-Distribution Detection"
+  authors:
+    - family-names: Wang
+      given-names: Zilin
+    - family-names: Xiao
+      given-names: Lianghai
+  year: 2026
+

@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and editors
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+*.swp
+
+# OpenOOD checkout (recreated by scripts/setup_openood.sh)
+/OpenOOD/
+
+# Datasets, archives, pretrained weights, and caches
+data/
+archives/
+cache/
+openood_pretrained/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.npy
+*.npz
+
+# Runtime outputs
+logs/
+outputs/
+results/
+results_openood/
+results_openood_baselines/
+nohup.out
+*.pid
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
