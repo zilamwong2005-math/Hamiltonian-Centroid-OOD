@@ -178,6 +178,77 @@ run_imagenet1k_trajectory() {
   done
 }
 
+# Complete the previously exploratory T=10 condition with all detector seeds.
+# This is deliberately separate from trajectory_imagenet1k so that an AutoDL
+# restart does not re-run the already complete T=0/3 matrix.
+run_imagenet1k_t10() {
+  for seed in "${SEED_LIST[@]}"; do
+    run_imagenet_trajectory_one imagenet1k "${seed}" 10
+  done
+}
+
+run_ctm_smoke() {
+  run_once "ctm_smoke" \
+    "${PYTHON}" -u run_ctm_baseline.py \
+    --stage smoke \
+    --data-root "${DATA_ROOT}" \
+    --openood-results-root "${OPENOOD_CKPT_ROOT}" \
+    --openood-root "${PROJECT}/OpenOOD" \
+    --hamiltonian-root "${OUTPUT_ROOT}" \
+    --journal-root "${JOURNAL_ROOT}" \
+    --output-root "${JOURNAL_ROOT}/ctm" \
+    --cache-root "${PROJECT}/cache/pretrained" \
+    --seeds "${SEED_LIST[@]}" \
+    --num-workers 8 --max-eval-samples 128 \
+    --smoke-setup-samples-per-class 2 --no-progress
+}
+
+run_ctm_full() {
+  run_once "ctm_full" \
+    "${PYTHON}" -u run_ctm_baseline.py \
+    --stage full \
+    --data-root "${DATA_ROOT}" \
+    --openood-results-root "${OPENOOD_CKPT_ROOT}" \
+    --openood-root "${PROJECT}/OpenOOD" \
+    --hamiltonian-root "${OUTPUT_ROOT}" \
+    --journal-root "${JOURNAL_ROOT}" \
+    --output-root "${JOURNAL_ROOT}/ctm" \
+    --cache-root "${PROJECT}/cache/pretrained" \
+    --seeds "${SEED_LIST[@]}" --num-workers 8
+}
+
+run_static_reduction_bridge_smoke() {
+  run_once "static_reduction_bridge_smoke" \
+    "${PYTHON}" -u run_static_reduction_bridge.py \
+    --stage smoke --openood-root "${PROJECT}/OpenOOD" \
+    --hamiltonian-root "${OUTPUT_ROOT}" \
+    --output-root "${JOURNAL_ROOT}/static_reduction_bridge" \
+    --seeds "${SEED_LIST[@]}" --batch-size 64 --max-eval-samples 128
+}
+
+run_static_reduction_bridge_full() {
+  run_once "static_reduction_bridge_full" \
+    "${PYTHON}" -u run_static_reduction_bridge.py \
+    --stage full --openood-root "${PROJECT}/OpenOOD" \
+    --hamiltonian-root "${OUTPUT_ROOT}" \
+    --output-root "${JOURNAL_ROOT}/static_reduction_bridge" \
+    --seeds "${SEED_LIST[@]}" --batch-size 64
+}
+
+run_ctm_summary() {
+  run_once "ctm_summary" \
+    "${PYTHON}" -u summarize_ctm_comparison.py \
+    --stage full --ctm-root "${JOURNAL_ROOT}/ctm" \
+    --journal-root "${JOURNAL_ROOT}" \
+    --output-root "${JOURNAL_ROOT}/summary_ctm_comparison"
+}
+
+run_required_additions_audit() {
+  run_once "required_additions_audit" \
+    "${PYTHON}" -u audit_required_additions.py \
+    --output-root "${OUTPUT_ROOT}" --journal-root "${JOURNAL_ROOT}"
+}
+
 run_imagenet200_mass() {
   for seed in "${SEED_LIST[@]}"; do
     for normalization in none class_mean global_mean; do
@@ -305,6 +376,7 @@ run_efficiency() {
       --openood-root "${PROJECT}/OpenOOD" \
       --detector-search-root "${search_root}" \
       --locked-results-root "${JOURNAL_ROOT}" \
+      --ctm-root "${JOURNAL_ROOT}/ctm" \
       --output "${JOURNAL_ROOT}/efficiency/efficiency.csv" \
       --steps 0 1 3 10 --batch-size "${batch_size}" \
       --warmup 10 --repeats 50 --num-workers 8
@@ -313,20 +385,16 @@ run_efficiency() {
 
 run_efficiency_batch1() {
   for benchmark in cifar10 cifar100 imagenet200 imagenet1k; do
-    local search_root="${OUTPUT_ROOT}"
-    if [[ "${benchmark}" == cifar10 || "${benchmark}" == cifar100 ]]; then
-      search_root="${JOURNAL_ROOT}/cifar_trajectory/checkpoints"
-    fi
-    run_once "efficiency_b1_${benchmark}" \
-      "${PYTHON}" -u benchmark_inference_efficiency.py \
+    run_once "efficiency_ctm_b1_v3_${benchmark}" \
+      "${PYTHON}" -u benchmark_ctm_paired_efficiency.py \
       --benchmark "${benchmark}" --seed 0 \
       --data-root "${DATA_ROOT}" \
       --openood-results-root "${OPENOOD_CKPT_ROOT}" \
       --openood-root "${PROJECT}/OpenOOD" \
-      --detector-search-root "${search_root}" \
-      --locked-results-root "${JOURNAL_ROOT}" \
+      --ctm-root "${JOURNAL_ROOT}/ctm" \
       --output "${JOURNAL_ROOT}/efficiency/efficiency.csv" \
-      --steps 0 --batch-size 1 --warmup 10 --repeats 50 --num-workers 8
+      --batch-size 1 --warmup 10 --repeats 50 --num-workers 8 \
+      --geometry-weight 0.8
   done
 }
 
@@ -384,6 +452,14 @@ run_required_efficiency_summary() {
     --batch-size 1
 }
 
+run_ctm_efficiency_summary() {
+  run_once "efficiency_ctm_summary_v2" \
+    "${PYTHON}" -u summarize_ctm_efficiency.py \
+    --input "${JOURNAL_ROOT}/efficiency/efficiency.csv" \
+    --output-dir "${JOURNAL_ROOT}/efficiency/summary_ctm" \
+    --batch-size 1 --seed 0
+}
+
 run_all_method_summary() {
   run_once "all_method_summary" \
     "${PYTHON}" -u summarize_all_method_comparison.py \
@@ -416,7 +492,18 @@ Stages (recommended order):
   smoke                  128-sample compatibility check; never report metrics
   trajectory_cifar       Gaussian/IMQ, T=0/1/3/10, three seeds
   trajectory_imagenet200 Gaussian/IMQ, T=0/1/3; existing T=10 is retained
-  trajectory_imagenet1k  Gaussian/IMQ, T=0/3; existing T=1/10 is retained
+  trajectory_imagenet1k  Gaussian/IMQ, T=0/3, three seeds
+  trajectory_imagenet1k_t10
+                         Complete Gaussian/IMQ T=10 with three seeds
+  ctm_smoke              Non-reportable CTM compatibility matrix (11 model runs)
+  ctm_full               Formal same-protocol CTM matrix; full ID-train means
+  ctm_summary            Compare CTM with setup-bank centroid and locked fusion
+  static_reduction_bridge_smoke
+                         Non-reportable validation-only six-stage bridge check
+  static_reduction_bridge
+                         Formal validation-only six-stage static-reduction bridge
+  required_additions_audit
+                         Strictly verify CTM, bridge, and ImageNet-1K T=10 outputs
   mass_cifar             effective-rank normalization ablation, T=0, 3 seeds
   mass_imagenet200       effective-rank normalization ablation, T=0, 3 seeds
   baselines_cheap        EBO/MLS/GEN/ReAct/Scale under local OpenOOD
@@ -430,10 +517,11 @@ Stages (recommended order):
   baselines_extended_summary
                          Validate matrix and write CSV/LaTeX paper tables
   baselines_extended     Run the preceding three formal extended stages
-  efficiency             MSP and T=0/1/3/10 latency/VRAM, seed 0
-  efficiency_b1          Comparable batch-1 MSP/current-method efficiency
+  efficiency             Paired MSP/CTM/current-method and T=0/1/3/10 efficiency
+  efficiency_b1          Paired batch-1 MSP/CTM/current-method latency and VRAM
   efficiency_extended    Batch-1 ASH/DICE/SHE/RMDS/RankFeat efficiency
   efficiency_scale       Batch-1 Scale efficiency on all four benchmarks
+  efficiency_ctm_summary Build the paired batch-1 CTM/current-method table
   efficiency_required_summary
                          Merge all batch-1 efficiency results for the paper
   all_method_summary     Unified ranking and locked-method win/loss audit
@@ -448,6 +536,13 @@ case "${1:-help}" in
   trajectory_cifar) run_cifar_trajectory ;;
   trajectory_imagenet200) run_imagenet200_trajectory ;;
   trajectory_imagenet1k) run_imagenet1k_trajectory ;;
+  trajectory_imagenet1k_t10) run_imagenet1k_t10 ;;
+  ctm_smoke) run_ctm_smoke ;;
+  ctm_full) run_ctm_full ;;
+  ctm_summary) run_ctm_summary ;;
+  static_reduction_bridge_smoke) run_static_reduction_bridge_smoke ;;
+  static_reduction_bridge) run_static_reduction_bridge_full ;;
+  required_additions_audit) run_required_additions_audit ;;
   mass_cifar) run_cifar_mass ;;
   mass_imagenet200) run_imagenet200_mass ;;
   baselines_cheap) run_cheap_baselines ;;
@@ -462,6 +557,7 @@ case "${1:-help}" in
   efficiency_b1) run_efficiency_batch1 ;;
   efficiency_extended) run_extended_efficiency ;;
   efficiency_scale) run_scale_efficiency ;;
+  efficiency_ctm_summary) run_ctm_efficiency_summary ;;
   efficiency_required_summary) run_required_efficiency_summary ;;
   all_method_summary) run_all_method_summary ;;
   baselines_extended_audit) run_extended_baseline_audit ;;

@@ -8,11 +8,11 @@ authors:
   - family-names: Xiao
     given-names: Lianghai
 repository-code: "https://github.com/zilamwong2005-math/Hamiltonian-Centroid-OOD"
-date-released: 2026-08-21
-version: "0.1.0"
+date-released: 2026-09-07
+version: "0.2.0"
 preferred-citation:
   type: article
-  title: "From Hamiltonian Flows to Class-Centroid Geometry: A Mechanistic Study of Efficient Out-of-Distribution Detection"
+  title: "From Hamiltonian Flows to Class-Centroid Geometry: Testing a Dynamical Hypothesis for Out-of-Distribution Detection"
   authors:
     - family-names: Wang
       given-names: Zilin

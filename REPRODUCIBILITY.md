@@ -35,6 +35,13 @@ AUROC and FPR@95 are primary. AUPR-IN and AUPR-OUT are retained in every formal 
 
 The trajectory score at `T = 0` is exactly the empirical static anchor-affinity field. Replacing that field by a class-centroid cosine score is an approximation controlled by within-class concentration and common-scale assumptions; it is not an algebraic identity for arbitrary class-dependent bandwidths or weights.
 
+`run_static_reduction_bridge.py` audits this reduction in six pre-specified
+stages. It reads only the ImageNet-1K ID validation split and OpenImage-O
+validation split. The Near-OOD and Far-OOD test loaders are not constructed by
+this runner. Stage S1 evaluates the exact all-class static field
+(`candidate_k = 0`); it is intentionally distinct from the candidate-pruned
+deployment score.
+
 ## 6. OpenOOD provenance
 
 The evaluation code is checked out at:
@@ -56,3 +63,15 @@ The repository includes equivalence tests and a local audit script. This is an e
 
 Efficiency comparisons use the same GPU, process, precision, batch size, warm-up policy, and number of repeats. Data loading is excluded from timed inference. Batch-one latency is the main deployment-oriented comparison.
 
+## 8. CTM control and setup accounting
+
+`run_ctm_baseline.py` reproduces the CTM class-mean cosine statistic under the
+same local OpenOOD data and metric protocol. Formal CTM centroids use all ID
+training features. Fixed ImageNet-1K backbones are evaluated once rather than
+being relabelled as multiple independent seeds.
+
+The paired efficiency runner separately records (i) the number of images
+processed by the backbone during setup and (ii) the number of samples entering
+the final centroid estimate. This distinction matters on CIFAR, where the
+current implementation extracts the full training feature set before retaining
+the class-balanced bank, and on ImageNet, where it processes only the bank.

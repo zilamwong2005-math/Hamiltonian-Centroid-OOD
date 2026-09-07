@@ -16,15 +16,23 @@ from types import SimpleNamespace
 
 import pandas as pd
 import torch
+import torch.nn.functional as F
 
 from Imagenet_ood_experiment import add_openood_to_path
 from hamiltonian_detector import HamiltonianDetector, load_torch_checkpoint
+from run_ctm_baseline import _ctm_confidence, _forward_raw_feature
 from run_msp_baselines import OPENOOD_ID_NAME, _model_for_benchmark
 
 
 BENCHMARKS = ("cifar10", "cifar100", "imagenet200", "imagenet1k")
 CLASS_COUNTS = {"cifar10": 10, "cifar100": 100,
                 "imagenet200": 200, "imagenet1k": 1000}
+LOCKED_CENTROID_SAMPLES_PER_CLASS = {
+    "cifar10": 80,
+    "cifar100": 80,
+    "imagenet200": 12,
+    "imagenet1k": 12,
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("results/journal"),
         help="Journal root used to auto-discover locked fusion configs",
+    )
+    parser.add_argument(
+        "--ctm-root",
+        type=Path,
+        help=(
+            "Optional root produced by run_ctm_baseline.py. When supplied, "
+            "the audited full-ID-training CTM endpoint is measured on the "
+            "same fixed GPU batch as the proposed score."
+        ),
     )
     parser.add_argument("--potential", default="gaussian")
     parser.add_argument("--steps", type=int, nargs="+", default=[0, 1, 3, 10])
@@ -91,6 +108,99 @@ def discover_locked_config(root: Path, benchmark: str, seed: int) -> Path:
             f"Locked fusion config not found for {benchmark} seed {seed}: {path}"
         )
     return path
+
+
+def _ctm_target(benchmark: str) -> str:
+    return "imagenet1k_resnet50" if benchmark == "imagenet1k" else benchmark
+
+
+def load_ctm_cache(
+    path: Path,
+    *,
+    benchmark: str,
+    seed: int,
+    model_tag: str | None = None,
+) -> tuple[torch.Tensor, dict, dict]:
+    """Load and validate one audited full-training CTM class-direction cache."""
+
+    payload = load_torch_checkpoint(path, map_location="cpu")
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Malformed CTM cache: {path}")
+    metadata = payload.get("metadata")
+    audit = payload.get("audit")
+    directions = payload.get("class_directions")
+    counts = payload.get("class_counts")
+    if not isinstance(metadata, dict) or not isinstance(audit, dict):
+        raise RuntimeError(f"CTM cache lacks metadata/audit dictionaries: {path}")
+    if not isinstance(directions, torch.Tensor) or not isinstance(counts, torch.Tensor):
+        raise RuntimeError(f"CTM cache lacks class directions/counts: {path}")
+    expected_target = _ctm_target(benchmark)
+    checks = {
+        "method": "CTM",
+        "stage": "full",
+        "target": expected_target,
+        "benchmark": benchmark,
+        "seed": int(seed),
+        "n_classes": CLASS_COUNTS[benchmark],
+        "setup_samples_per_class": 0,
+    }
+    for key, expected in checks.items():
+        if metadata.get(key) != expected:
+            raise RuntimeError(
+                f"CTM cache metadata mismatch for {key}: expected {expected!r}, "
+                f"found {metadata.get(key)!r} in {path}"
+            )
+    if model_tag is not None and metadata.get("model_tag") != model_tag:
+        raise RuntimeError(
+            f"CTM cache model mismatch: expected {model_tag!r}, "
+            f"found {metadata.get('model_tag')!r} in {path}"
+        )
+    expected_classes = CLASS_COUNTS[benchmark]
+    if directions.ndim != 2 or directions.shape[0] != expected_classes:
+        raise RuntimeError(
+            f"CTM directions have shape {tuple(directions.shape)}, expected "
+            f"({expected_classes}, feature_dim)"
+        )
+    if counts.ndim != 1 or len(counts) != expected_classes or (counts <= 0).any():
+        raise RuntimeError(f"Invalid CTM class counts in {path}")
+    if not torch.isfinite(directions).all():
+        raise RuntimeError(f"Non-finite CTM class direction in {path}")
+    if not bool(audit.get("all_id_train_samples")):
+        raise RuntimeError(f"Refusing non-full-training CTM cache: {path}")
+    processed = int(audit.get("processed_setup_samples", -1))
+    dataset_size = int(audit.get("train_dataset_size", -2))
+    if processed <= 0 or processed != dataset_size or int(counts.sum()) != processed:
+        raise RuntimeError(f"Incomplete CTM setup audit in {path}")
+    return directions.float(), metadata, audit
+
+
+def discover_ctm_cache(
+    root: Path, benchmark: str, seed: int, model_tag: str | None = None
+) -> Path:
+    """Find the unique full-training CTM cache for a benchmark/model seed."""
+
+    target = _ctm_target(benchmark)
+    search_root = root / "centroids" / "full" / target
+    candidates = sorted(search_root.rglob(f"seed{seed}_class_means.pt"))
+    accepted = []
+    errors = []
+    for path in candidates:
+        try:
+            load_ctm_cache(
+                path, benchmark=benchmark, seed=seed, model_tag=model_tag
+            )
+        except RuntimeError as error:
+            errors.append(f"{path}: {error}")
+        else:
+            accepted.append(path)
+    if len(accepted) != 1:
+        detail = "\n".join(errors[:5])
+        raise RuntimeError(
+            f"Expected one audited full CTM cache for {benchmark} seed {seed} "
+            f"under {search_root}; found {len(accepted)}."
+            + (f"\nRejected candidates:\n{detail}" if detail else "")
+        )
+    return accepted[0]
 
 
 def _state_megabytes(module: torch.nn.Module) -> float:
@@ -185,6 +295,8 @@ def main() -> None:
         "locked_results_root",
     ):
         setattr(args, field, getattr(args, field).resolve())
+    if args.ctm_root is not None:
+        args.ctm_root = args.ctm_root.resolve()
     args.output = args.output.resolve()
     if args.detector_checkpoint:
         detector_path = args.detector_checkpoint.resolve()
@@ -230,6 +342,20 @@ def main() -> None:
     network, preprocessor, model_tag, model_source = _model_for_benchmark(
         args.benchmark, model_args, args.seed
     )
+    ctm_path = None
+    ctm_directions = None
+    ctm_metadata = None
+    ctm_audit = None
+    if args.ctm_root is not None:
+        ctm_path = discover_ctm_cache(
+            args.ctm_root, args.benchmark, args.seed, model_tag
+        )
+        ctm_directions, ctm_metadata, ctm_audit = load_ctm_cache(
+            ctm_path,
+            benchmark=args.benchmark,
+            seed=args.seed,
+            model_tag=model_tag,
+        )
     network = network.cuda().eval()
     evaluator = Evaluator(
         network,
@@ -242,6 +368,7 @@ def main() -> None:
         shuffle=False,
         num_workers=args.num_workers,
     )
+    train_dataset_size = len(evaluator.dataloader_dict["id"]["train"].dataset)
     batch = next(iter(evaluator.dataloader_dict["id"]["test"]))
     data = batch["data"][: args.batch_size].cuda(non_blocking=True)
     actual_batch = len(data)
@@ -253,12 +380,53 @@ def main() -> None:
     )
     del locked_detector
     with torch.inference_mode():
-        _, fixed_feature = _forward_with_feature(network, data)
+        fixed_logits, fixed_raw_feature = _forward_raw_feature(network, data)
+        fixed_feature = F.normalize(fixed_raw_feature, dim=-1)
     if fixed_feature.shape[1] != detector.feat_dim:
         raise RuntimeError(
             f"Feature mismatch: model={fixed_feature.shape[1]}, "
             f"detector={detector.feat_dim}"
         )
+    locked_centroid_samples = (
+        CLASS_COUNTS[args.benchmark]
+        * LOCKED_CENTROID_SAMPLES_PER_CLASS[args.benchmark]
+    )
+    if args.benchmark in {"cifar10", "cifar100"}:
+        locked_setup_samples = train_dataset_size
+        locked_setup_protocol = (
+            "Full ID-training feature pass followed by 80 anchors per class"
+        )
+    else:
+        locked_setup_samples = locked_centroid_samples
+        locked_setup_protocol = "12 class-balanced ID-training images per class"
+    ctm_setup = None
+    if (
+        ctm_directions is not None
+        and ctm_path is not None
+        and ctm_metadata is not None
+        and ctm_audit is not None
+    ):
+        ctm_directions = ctm_directions.cuda()
+        if ctm_directions.shape[1] != fixed_raw_feature.shape[1]:
+            raise RuntimeError(
+                f"CTM feature mismatch: cache={ctm_directions.shape[1]}, "
+                f"model={fixed_raw_feature.shape[1]}"
+            )
+        ctm_state_mb = (
+            ctm_directions.numel() * ctm_directions.element_size() / 1024**2
+        )
+        ctm_setup = {
+            "CTMCache": str(ctm_path),
+            "CTMOfficialCommit": ctm_metadata.get("official_commit"),
+            "CTMOfficialCTMPySHA256": ctm_metadata.get("official_ctm_py_sha256"),
+            "AuxiliaryStateMB": ctm_state_mb,
+            "SetupSamples": int(ctm_audit["processed_setup_samples"]),
+            "CentroidEstimationSamples": int(
+                ctm_audit["processed_setup_samples"]
+            ),
+            "SetupSeconds": float(ctm_audit["elapsed_seconds"]),
+            "SetupProtocol": "Full ID-training pass recorded by CTM reproduction",
+        }
 
     metadata = {
         "Benchmark": args.benchmark,
@@ -277,6 +445,8 @@ def main() -> None:
         "LockedConfig": str(locked_config_path),
         "LockedDetectorCheckpoint": str(locked_detector_path),
         "LockedGeometryWeight": alpha,
+        "TimingScope": "fixed preloaded GPU batch; data loading excluded",
+        "TimingMethod": "perf_counter with CUDA synchronization",
     }
     rows = []
 
@@ -288,9 +458,30 @@ def main() -> None:
 
     rows.append({
         **metadata, "Mode": "MSP-end-to-end", "TrajectorySteps": -1,
-        "AuxiliaryStateMB": 0.0,
+        "AuxiliaryStateMB": 0.0, "SetupSamples": 0,
+        "CentroidEstimationSamples": 0,
+        "SetupSeconds": 0.0, "SetupProtocol": "No offline setup",
         **_measure(msp_end_to_end, args.warmup, args.repeats, actual_batch),
     })
+
+    if ctm_directions is not None and ctm_setup is not None:
+        def ctm_detector_only():
+            return _ctm_confidence(fixed_raw_feature, ctm_directions)
+
+        def ctm_end_to_end():
+            _, raw_feature = _forward_raw_feature(network, data)
+            return _ctm_confidence(raw_feature, ctm_directions)
+
+        rows.append({
+            **metadata, **ctm_setup, "Mode": "CTM-detector-only",
+            "TrajectorySteps": -1,
+            **_measure(ctm_detector_only, args.warmup, args.repeats, actual_batch),
+        })
+        rows.append({
+            **metadata, **ctm_setup, "Mode": "CTM-end-to-end",
+            "TrajectorySteps": -1,
+            **_measure(ctm_end_to_end, args.warmup, args.repeats, actual_batch),
+        })
 
     def centroid_only():
         return (fixed_feature @ locked_centroids.T).amax(dim=1)
@@ -311,13 +502,44 @@ def main() -> None:
     rows.append({
         **metadata, "Mode": "Centroid-detector-only", "TrajectorySteps": -1,
         "AuxiliaryStateMB": locked_centroid_mb,
+        "SetupSamples": locked_setup_samples,
+        "CentroidEstimationSamples": locked_centroid_samples,
+        "SetupSeconds": float("nan"),
+        "SetupProtocol": locked_setup_protocol,
         **_measure(centroid_only, args.warmup, args.repeats, actual_batch),
     })
     rows.append({
         **metadata, "Mode": "Locked-centroid-MSP-end-to-end",
         "TrajectorySteps": -1,
         "AuxiliaryStateMB": locked_centroid_mb,
+        "SetupSamples": locked_setup_samples,
+        "CentroidEstimationSamples": locked_centroid_samples,
+        "SetupSeconds": float("nan"),
+        "SetupProtocol": locked_setup_protocol,
         **_measure(locked_end_to_end, args.warmup, args.repeats, actual_batch),
+    })
+
+    def locked_detector_only():
+        msp = fixed_logits.softmax(1).amax(dim=1)
+        geometry = (fixed_feature @ locked_centroids.T).amax(dim=1)
+        return (
+            (1.0 - alpha)
+            * (msp - float(calibration["msp_mean"]))
+            / max(float(calibration["msp_std"]), 1e-12)
+            + alpha
+            * (geometry - float(calibration["geometry_mean"]))
+            / max(float(calibration["geometry_std"]), 1e-12)
+        )
+
+    rows.append({
+        **metadata, "Mode": "Locked-centroid-MSP-detector-only",
+        "TrajectorySteps": -1,
+        "AuxiliaryStateMB": locked_centroid_mb,
+        "SetupSamples": locked_setup_samples,
+        "CentroidEstimationSamples": locked_centroid_samples,
+        "SetupSeconds": float("nan"),
+        "SetupProtocol": locked_setup_protocol,
+        **_measure(locked_detector_only, args.warmup, args.repeats, actual_batch),
     })
 
     detector_state_mb = _state_megabytes(detector)

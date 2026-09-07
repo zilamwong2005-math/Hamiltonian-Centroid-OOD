@@ -1,4 +1,4 @@
-"""Create a fair batch-1 efficiency table for the proposed and new methods."""
+"""Create fair batch-1 efficiency tables, including paired CTM comparisons."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ METHOD_LABELS = {
     "MSP-end-to-end": "MSP",
     "Locked-centroid-MSP-end-to-end": "Locked Centroid-MSP",
     "Centroid-detector-only": "Centroid score only",
+    "CTM-end-to-end": "CTM",
     "ash": "ASH",
     "dice": "DICE",
     "she": "SHE",
@@ -51,7 +52,10 @@ def summarize(current: pd.DataFrame, extended: pd.DataFrame,
         "P95Milliseconds", "ImagesPerSecond", "PeakAllocatedMB",
         "IncrementalPeakMB",
     ]
-    required_current = set(common + ["Mode"])
+    required_current = set(common + [
+        "Mode", "SetupSamples", "CentroidEstimationSamples",
+        "SetupSeconds", "SetupProtocol",
+    ])
     required_extended = set(common + [
         "Method", "SetupSeconds", "SetupProtocol", "FullSVD"
     ])
@@ -65,26 +69,15 @@ def summarize(current: pd.DataFrame, extended: pd.DataFrame,
         & pd.to_numeric(current["Seed"]).eq(seed)
         & current["Mode"].isin([
             "MSP-end-to-end", "Locked-centroid-MSP-end-to-end",
-            "Centroid-detector-only",
+            "Centroid-detector-only", "CTM-end-to-end",
         ])
-    ][common + ["Mode"]].copy()
+    ][common + [
+        "Mode", "SetupSamples", "CentroidEstimationSamples",
+        "SetupSeconds", "SetupProtocol",
+    ]].copy()
     current = current.rename(columns={"Mode": "Method"})
-    current["SetupSeconds"] = current["Method"].map({
-        "MSP-end-to-end": 0.0,
-        "Locked-centroid-MSP-end-to-end": float("nan"),
-        "Centroid-detector-only": float("nan"),
-    })
-    current["SetupProtocol"] = current["Method"].map({
-        "MSP-end-to-end": "No offline setup",
-        "Locked-centroid-MSP-end-to-end": (
-            "Precomputed class centroids; setup time not remeasured"
-        ),
-        "Centroid-detector-only": (
-            "Precomputed class centroids; setup time not remeasured"
-        ),
-    })
     current["FullSVD"] = False
-    current["Source"] = "Proposed-method efficiency benchmark"
+    current["Source"] = "Paired MSP/CTM/proposed-method efficiency benchmark"
 
     extended = extended[
         pd.to_numeric(extended["BatchSize"]).eq(batch_size)
@@ -92,6 +85,8 @@ def summarize(current: pd.DataFrame, extended: pd.DataFrame,
     ][common + [
         "Method", "SetupSeconds", "SetupProtocol", "FullSVD"
     ]].copy()
+    extended["SetupSamples"] = float("nan")
+    extended["CentroidEstimationSamples"] = float("nan")
     extended["Source"] = "Extended-baseline efficiency benchmark"
     frame = pd.concat([current, extended], ignore_index=True)
     frame = frame.drop_duplicates(
@@ -131,6 +126,75 @@ def summarize(current: pd.DataFrame, extended: pd.DataFrame,
     return frame.sort_values(["Benchmark", "LatencyRatioVsMSP", "Method"])
 
 
+def paired_ctm_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    """Contrast CTM and the locked score without assuming either is faster."""
+
+    methods = {
+        "CTM-end-to-end": "CTM",
+        "Locked-centroid-MSP-end-to-end": "Locked",
+    }
+    subset = frame[frame["Method"].isin(methods)].copy()
+    subset["Endpoint"] = subset["Method"].map(methods)
+    required = set(BENCHMARK_LABELS)
+    counts = subset.groupby("Benchmark")["Endpoint"].nunique()
+    incomplete = sorted(required - set(counts[counts.eq(2)].index))
+    if incomplete:
+        raise RuntimeError(f"Paired CTM efficiency rows are incomplete: {incomplete}")
+
+    columns = [
+        "MeanMilliseconds", "StdMilliseconds", "AuxiliaryStateMB",
+        "PeakAllocatedMB", "SetupSamples", "CentroidEstimationSamples",
+        "SetupSeconds",
+    ]
+    wide = subset.pivot(index="Benchmark", columns="Endpoint", values=columns)
+    rows = []
+    for benchmark in BENCHMARK_LABELS:
+        ctm_latency = float(wide.loc[benchmark, ("MeanMilliseconds", "CTM")])
+        locked_latency = float(wide.loc[benchmark, ("MeanMilliseconds", "Locked")])
+        ctm_samples = float(wide.loc[benchmark, ("SetupSamples", "CTM")])
+        locked_samples = float(wide.loc[benchmark, ("SetupSamples", "Locked")])
+        ctm_estimation = float(
+            wide.loc[benchmark, ("CentroidEstimationSamples", "CTM")]
+        )
+        locked_estimation = float(
+            wide.loc[benchmark, ("CentroidEstimationSamples", "Locked")]
+        )
+        rows.append({
+            "Benchmark": benchmark,
+            "BenchmarkLabel": BENCHMARK_LABELS[benchmark],
+            "CTMLatencyMilliseconds": ctm_latency,
+            "CTMLatencyStdMilliseconds": float(
+                wide.loc[benchmark, ("StdMilliseconds", "CTM")]
+            ),
+            "LockedLatencyMilliseconds": locked_latency,
+            "LockedLatencyStdMilliseconds": float(
+                wide.loc[benchmark, ("StdMilliseconds", "Locked")]
+            ),
+            "LockedLatencyRatioVsCTM": locked_latency / ctm_latency,
+            "LockedLatencyDeltaVsCTMPercent": (
+                locked_latency / ctm_latency - 1.0
+            ) * 100.0,
+            "CTMAuxiliaryStateMB": float(
+                wide.loc[benchmark, ("AuxiliaryStateMB", "CTM")]
+            ),
+            "LockedAuxiliaryStateMB": float(
+                wide.loc[benchmark, ("AuxiliaryStateMB", "Locked")]
+            ),
+            "CTMSetupSamples": int(ctm_samples),
+            "LockedSetupSamples": int(locked_samples),
+            "CTMSetupSampleRatioVsLocked": ctm_samples / locked_samples,
+            "CTMCentroidEstimationSamples": int(ctm_estimation),
+            "LockedCentroidEstimationSamples": int(locked_estimation),
+            "CTMCentroidEstimationSampleRatioVsLocked": (
+                ctm_estimation / locked_estimation
+            ),
+            "CTMRecordedSetupSeconds": float(
+                wide.loc[benchmark, ("SetupSeconds", "CTM")]
+            ),
+        })
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     args = build_parser().parse_args()
     frame = summarize(
@@ -145,15 +209,21 @@ def main() -> None:
         args.output_dir / "efficiency_comparison_batch1.csv",
         index=False, float_format="%.6f",
     )
+    paired = paired_ctm_summary(frame)
+    paired.to_csv(
+        args.output_dir / "ctm_paired_efficiency.csv",
+        index=False, float_format="%.6f",
+    )
     paper = frame[[
         "BenchmarkLabel", "MethodLabel", "MeanMilliseconds",
         "LatencyRatioVsMSP", "AuxiliaryStateMB", "PeakAllocatedMB",
-        "SetupSeconds", "SetupProtocol",
+        "SetupSamples", "CentroidEstimationSamples", "SetupSeconds",
+        "SetupProtocol",
     ]].copy()
     paper.columns = [
         "Benchmark", "Method", "Latency (ms/image)", "Latency / MSP",
-        "Aux. state (MB)", "Peak GPU (MB)", "Offline setup (s)",
-        "Offline setup protocol",
+        "Aux. state (MB)", "Peak GPU (MB)", "Setup samples",
+        "Centroid samples", "Offline setup (s)", "Offline setup protocol",
     ]
     paper.to_csv(
         args.output_dir / "efficiency_paper_table.csv",
@@ -171,6 +241,8 @@ def main() -> None:
     )
     print("===== Batch-1 efficiency comparison =====")
     print(paper.round(4).to_string(index=False))
+    print("\n===== Paired CTM versus locked score =====")
+    print(paired.round(4).to_string(index=False))
     print(f"\nSaved under: {args.output_dir}")
 
 

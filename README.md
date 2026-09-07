@@ -1,6 +1,6 @@
 # From Hamiltonian Flows to Class-Centroid Geometry
 
-Official research code for **“From Hamiltonian Flows to Class-Centroid Geometry: A Mechanistic Study of Efficient Out-of-Distribution Detection.”**
+Official research code for **“From Hamiltonian Flows to Class-Centroid Geometry: Testing a Dynamical Hypothesis for Out-of-Distribution Detection.”**
 
 This repository contains the Hamiltonian detector, its exact zero-step endpoint, the locked Centroid–MSP detector, OpenOOD benchmark runners, ablations, baseline reproductions, efficiency measurements, and table-generation scripts used in the manuscript.
 
@@ -12,6 +12,9 @@ The project starts from a Hamiltonian hypothesis in normalized feature space and
 - `ood_experiment.py` runs CIFAR-10/CIFAR-100 experiments.
 - `Imagenet_ood_experiment.py` runs ImageNet-200/ImageNet-1K OpenOOD experiments.
 - `run_locked_imagenet1k_fusion.py` and `run_locked_centroid_transfer.py` implement the validation-locked Centroid–MSP endpoint.
+- `run_static_reduction_bridge.py` evaluates the six-stage validation-only bridge from the exact static field to the locked endpoint.
+- `run_ctm_baseline.py` reproduces CTM under the same local OpenOOD protocol using full-training-set class means.
+- `benchmark_ctm_paired_efficiency.py` measures MSP, CTM, and Locked Centroid–MSP in one paired batch-one timing process.
 - `run_journal_experiments.sh` reproduces the journal experiment matrix and efficiency audits.
 
 The central empirical finding is that nonzero Hamiltonian propagation is not a scale-stable source of OOD separation in the tested construction. Its exact zero-step endpoint survives, admits a bounded class-centroid surrogate, and yields a low-cost detector when combined with MSP under a locked validation protocol.
@@ -100,12 +103,19 @@ bash run_journal_experiments.sh mass_cifar
 bash run_journal_experiments.sh trajectory_imagenet200
 bash run_journal_experiments.sh mass_imagenet200
 bash run_journal_experiments.sh trajectory_imagenet1k
+bash run_journal_experiments.sh trajectory_imagenet1k_t10
+bash run_journal_experiments.sh ctm_smoke
+bash run_journal_experiments.sh ctm_full
+bash run_journal_experiments.sh static_reduction_bridge
+bash run_journal_experiments.sh ctm_summary
+bash run_journal_experiments.sh required_additions_audit
 bash run_journal_experiments.sh baselines_cheap
 bash run_journal_experiments.sh baselines_heavy
 bash run_journal_experiments.sh baselines_extended
 bash run_journal_experiments.sh efficiency_b1
 bash run_journal_experiments.sh efficiency_extended
 bash run_journal_experiments.sh efficiency_scale
+bash run_journal_experiments.sh efficiency_ctm_summary
 bash run_journal_experiments.sh required_summaries
 ```
 
@@ -140,13 +150,20 @@ These runtime directories are ignored by Git. Summary scripts convert the formal
 
 Baseline numbers are local engineering reproductions under a common OpenOOD loader, backbone, checkpoint, and metric implementation. They are not presented as independent replications of every published number in the original baseline papers. The RMDS vectorization and streaming-statistics equivalence tests are included in `tests/test_rmds_vectorization.py`.
 
+The CTM control follows the class-mean cosine statistic at the pinned upstream
+commit recorded by `run_ctm_baseline.py`, while retaining the common local
+loader, checkpoint, and metric implementation. Formal CTM centroids use the
+complete ID training split. The proposed endpoint instead retains a fixed
+class-balanced setup bank; the two setup workloads and their paired online
+latencies are reported separately.
+
 ## Citation
 
 If this code is useful, please cite the accompanying manuscript. A machine-readable record is provided in [`CITATION.cff`](CITATION.cff).
 
 ```bibtex
 @article{wang2026hamiltonian,
-  title   = {From Hamiltonian Flows to Class-Centroid Geometry: A Mechanistic Study of Efficient Out-of-Distribution Detection},
+  title   = {From Hamiltonian Flows to Class-Centroid Geometry: Testing a Dynamical Hypothesis for Out-of-Distribution Detection},
   author  = {Wang, Zilin and Xiao, Lianghai},
   year    = {2026},
   note    = {Manuscript submitted for publication}

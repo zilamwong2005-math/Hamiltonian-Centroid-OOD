@@ -40,9 +40,9 @@ BASELINE_SEEDS = {
 IMAGE_TRAJECTORY_STEPS = {
     # ImageNet-200 already has a complete three-seed T=10 experiment.
     "ImageNet-200": {0, 1, 3, 10},
-    # ImageNet-1K T=10 was run only for seed 0 as a scaling diagnosis and is
-    # intentionally excluded from the three-seed journal table.
-    "ImageNet-1K": {0, 1, 3},
+    # T=10 is included only after the dedicated completion stage has produced
+    # all three detector seeds; the earlier seed-0 diagnostic is not enough.
+    "ImageNet-1K": {0, 1, 3, 10},
 }
 
 
