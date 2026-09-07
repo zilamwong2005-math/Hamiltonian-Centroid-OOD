@@ -371,3 +371,35 @@ SEEDS="0" bash run_cifar_experiments.sh potentials
 ```
 
 seed 0 验证成功后才运行 seed 1、2。正式结果文件是 `results/cifar/ood_results_cifar_v3.csv`；其中同时记录 OpenOOD 原生 `FPR95` 和另一种常见定义 `FPR95_IDTPR`，论文的 OpenOOD 表格使用前者。
+
+## 12. CTM、ImageNet-1K T=10 与六阶段桥接
+
+最新版实验矩阵另外包含三个预先限定的补充项目：同协议 CTM、
+ImageNet-1K 的 `T=10` 轨迹结果，以及只使用验证集的六阶段静态约化桥接。
+先运行 smoke，再运行正式阶段：
+
+```bash
+bash run_journal_experiments.sh ctm_smoke
+bash run_journal_experiments.sh static_reduction_bridge_smoke
+
+bash run_journal_experiments.sh trajectory_imagenet1k_t10
+bash run_journal_experiments.sh ctm_full
+bash run_journal_experiments.sh static_reduction_bridge
+bash run_journal_experiments.sh ctm_summary
+bash run_journal_experiments.sh required_additions_audit
+```
+
+CTM 正式阶段使用完整 ID 训练集计算类别均值。ImageNet-1K 的两个固定
+backbone 各运行一次；CIFAR-10、CIFAR-100 和 ImageNet-200 使用三个独立
+checkpoint seed。六阶段桥接仅使用 ImageNet-1K ID validation 和
+OpenImage-O validation，不构造 Near-OOD 或 Far-OOD test loader。
+
+在正式 CTM 中心缓存生成后，可运行成对 batch-one 延迟实验：
+
+```bash
+bash run_journal_experiments.sh efficiency_b1
+bash run_journal_experiments.sh efficiency_ctm_summary
+```
+
+该计时在同一进程、同一模型、同一预加载输入和同一 GPU 上比较 MSP、CTM
+与 Locked Centroid--MSP；数据加载不计入延迟，backbone 前向计入延迟。
