@@ -75,3 +75,23 @@ processed by the backbone during setup and (ii) the number of samples entering
 the final centroid estimate. This distinction matters on CIFAR, where the
 current implementation extracts the full training feature set before retaining
 the class-balanced bank, and on ImageNet, where it processes only the bank.
+
+## 9. CADRef and LogitGap controls
+
+`run_cadref_logitgap.py` keeps the local OpenOOD v1.5 loaders, preprocessing,
+backbones, checkpoints, and metric implementation fixed while changing only the
+post-hoc score. The runner records the inspected upstream repository commits
+and source hashes in every completion manifest.
+
+- Formal CADRef-Energy estimates its raw class means and global mean training
+  energy from the complete ID training split.
+- Fixed LogitGap is training-free; its comparison-logit count follows the
+  released fixed convention recorded in the runner.
+- Neither method reads OOD test samples during setup or hyperparameter
+  selection.
+- CIFAR-10, CIFAR-100, and ImageNet-200 use three independently trained
+  checkpoint seeds. Each fixed ImageNet-1K backbone is evaluated once.
+
+Smoke runs cap both evaluation and CADRef setup samples and are compatibility
+checks only. `summarize_cadref_logitgap.py` rejects incomplete or smoke-derived
+formal matrices before producing the paper tables.

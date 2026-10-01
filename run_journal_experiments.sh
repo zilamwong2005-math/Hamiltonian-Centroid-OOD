@@ -217,6 +217,46 @@ run_ctm_full() {
     --seeds "${SEED_LIST[@]}" --num-workers 8
 }
 
+run_cadref_logitgap_smoke() {
+  run_once "cadref_logitgap_smoke" \
+    "${PYTHON}" -u run_cadref_logitgap.py \
+    --stage smoke \
+    --methods cadref logitgap \
+    --targets cifar10 cifar100 imagenet200 \
+      imagenet1k_resnet50 imagenet1k_densenet121 \
+    --data-root "${DATA_ROOT}" \
+    --openood-results-root "${OPENOOD_CKPT_ROOT}" \
+    --openood-root "${PROJECT}/OpenOOD" \
+    --output-root "${JOURNAL_ROOT}/cadref_logitgap" \
+    --cache-root "${PROJECT}/cache/pretrained" \
+    --seeds "${SEED_LIST[@]}" \
+    --num-workers 8 --max-eval-samples 128 \
+    --smoke-setup-samples-per-class 2 --no-progress
+}
+
+run_cadref_logitgap_full() {
+  run_once "cadref_logitgap_full" \
+    "${PYTHON}" -u run_cadref_logitgap.py \
+    --stage full \
+    --methods cadref logitgap \
+    --targets cifar10 cifar100 imagenet200 \
+      imagenet1k_resnet50 imagenet1k_densenet121 \
+    --data-root "${DATA_ROOT}" \
+    --openood-results-root "${OPENOOD_CKPT_ROOT}" \
+    --openood-root "${PROJECT}/OpenOOD" \
+    --output-root "${JOURNAL_ROOT}/cadref_logitgap" \
+    --cache-root "${PROJECT}/cache/pretrained" \
+    --seeds "${SEED_LIST[@]}" --num-workers 8
+}
+
+run_cadref_logitgap_summary() {
+  run_once "cadref_logitgap_summary" \
+    "${PYTHON}" -u summarize_cadref_logitgap.py \
+    --stage full \
+    --input-root "${JOURNAL_ROOT}/cadref_logitgap" \
+    --output-root "${JOURNAL_ROOT}/summary_cadref_logitgap"
+}
+
 run_static_reduction_bridge_smoke() {
   run_once "static_reduction_bridge_smoke" \
     "${PYTHON}" -u run_static_reduction_bridge.py \
@@ -498,6 +538,10 @@ Stages (recommended order):
   ctm_smoke              Non-reportable CTM compatibility matrix (11 model runs)
   ctm_full               Formal same-protocol CTM matrix; full ID-train means
   ctm_summary            Compare CTM with setup-bank centroid and locked fusion
+  cadref_logitgap_smoke  Non-reportable 128-sample compatibility matrix
+  cadref_logitgap_full   Formal same-protocol CADRef-Energy and fixed LogitGap
+  cadref_logitgap_summary
+                         Validate and summarise the formal Near/Far results
   static_reduction_bridge_smoke
                          Non-reportable validation-only six-stage bridge check
   static_reduction_bridge
@@ -540,6 +584,9 @@ case "${1:-help}" in
   ctm_smoke) run_ctm_smoke ;;
   ctm_full) run_ctm_full ;;
   ctm_summary) run_ctm_summary ;;
+  cadref_logitgap_smoke) run_cadref_logitgap_smoke ;;
+  cadref_logitgap_full) run_cadref_logitgap_full ;;
+  cadref_logitgap_summary) run_cadref_logitgap_summary ;;
   static_reduction_bridge_smoke) run_static_reduction_bridge_smoke ;;
   static_reduction_bridge) run_static_reduction_bridge_full ;;
   required_additions_audit) run_required_additions_audit ;;

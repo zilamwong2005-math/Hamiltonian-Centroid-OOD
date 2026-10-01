@@ -14,6 +14,7 @@ The project starts from a Hamiltonian hypothesis in normalized feature space and
 - `run_locked_imagenet1k_fusion.py` and `run_locked_centroid_transfer.py` implement the validation-locked Centroid–MSP endpoint.
 - `run_static_reduction_bridge.py` evaluates the six-stage validation-only bridge from the exact static field to the locked endpoint.
 - `run_ctm_baseline.py` reproduces CTM under the same local OpenOOD protocol using full-training-set class means.
+- `run_cadref_logitgap.py` evaluates CADRef-Energy and fixed LogitGap under the same loaders, checkpoints, and metrics.
 - `benchmark_ctm_paired_efficiency.py` measures MSP, CTM, and Locked Centroid–MSP in one paired batch-one timing process.
 - `run_journal_experiments.sh` reproduces the journal experiment matrix and efficiency audits.
 
@@ -53,7 +54,10 @@ python -m py_compile \
   ood_experiment.py \
   Imagenet_ood_experiment.py \
   openood_hamiltonian_postprocessor.py \
-  prepare_openood.py
+  prepare_openood.py \
+  run_cadref_logitgap.py \
+  summarize_cadref_logitgap.py \
+  verify_cadref_logitgap_setup.py
 
 python -m pytest -q tests
 bash -n run_journal_experiments.sh
@@ -86,6 +90,8 @@ python -u prepare_openood.py \
 ```
 
 ImageNet-1K itself must be obtained under the ImageNet terms. The preparation script does not redistribute it. AutoDL extraction and path-layout instructions are provided in [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md).
+The dedicated fresh-instance checklist for the newest baselines is available in
+[`docs/CADREF_LOGITGAP_AUTODL.md`](docs/CADREF_LOGITGAP_AUTODL.md).
 
 ## Reproduce the main studies
 
@@ -106,6 +112,9 @@ bash run_journal_experiments.sh trajectory_imagenet1k
 bash run_journal_experiments.sh trajectory_imagenet1k_t10
 bash run_journal_experiments.sh ctm_smoke
 bash run_journal_experiments.sh ctm_full
+bash run_journal_experiments.sh cadref_logitgap_smoke
+bash run_journal_experiments.sh cadref_logitgap_full
+bash run_journal_experiments.sh cadref_logitgap_summary
 bash run_journal_experiments.sh static_reduction_bridge
 bash run_journal_experiments.sh ctm_summary
 bash run_journal_experiments.sh required_additions_audit
@@ -156,6 +165,14 @@ loader, checkpoint, and metric implementation. Formal CTM centroids use the
 complete ID training split. The proposed endpoint instead retains a fixed
 class-balanced setup bank; the two setup workloads and their paired online
 latencies are reported separately.
+
+CADRef-Energy and fixed LogitGap are evaluated by
+`run_cadref_logitgap.py`. The runner pins the inspected upstream revisions,
+uses the same OpenOOD splits and checkpoint matrix as the other comparisons,
+uses every ID-training sample for formal CADRef statistics, and treats LogitGap
+as training-free. Neither method uses OOD test samples for tuning. Fixed
+ImageNet-1K backbones are evaluated once rather than copied across artificial
+seeds.
 
 ## Citation
 
